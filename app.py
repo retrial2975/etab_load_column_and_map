@@ -2,43 +2,49 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# ตั้งค่าให้หน้าเว็บแสดงผลแบบเต็มความกว้าง
+# Set page to wide layout
 st.set_page_config(layout="wide")
 
-# --- Function สำหรับแปลง DataFrame เป็น CSV ---
+# --- Helper Function to Convert DataFrame to CSV ---
 @st.cache_data
 def convert_df_to_csv(df):
+    """Converts a DataFrame to a CSV file for the download button."""
     return df.to_csv(index=False).encode('utf-8')
 
-# --- ส่วนของการคำนวณ (Function) ---
+# --- Main Data Processing Function ---
 @st.cache_data
 def process_excel_data(uploaded_excel_file):
     """
-    ฟังก์ชันหลักในการประมวลผลข้อมูลจากไฟล์ Excel ที่อัปโหลด
+    Main function to process the uploaded Excel file.
+    This version uses the stable logic from the first working version to prevent KeyErrors.
     """
     try:
         df_forces = pd.read_excel(uploaded_excel_file, sheet_name='Element Forces - Columns', header=1).drop(0).reset_index(drop=True)
         df_connectivity = pd.read_excel(uploaded_excel_file, sheet_name='Column Object Connectivity', header=1).drop(0).reset_index(drop=True)
         df_points = pd.read_excel(uploaded_excel_file, sheet_name='Point Object Connectivity', header=1).drop(0).reset_index(drop=True)
     except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการอ่านชีทจากไฟล์ Excel: {e}")
-        st.error("กรุณาตรวจสอบว่าไฟล์ Excel มีชีทชื่อ 'Element Forces - Columns', 'Column Object Connectivity', และ 'Point Object Connectivity' ครบถ้วน")
+        st.error(f"Error reading sheets from Excel file: {e}")
+        st.error("Please ensure the Excel file contains the sheets: 'Element Forces - Columns', 'Column Object Connectivity', and 'Point Object Connectivity'.")
         return None
 
+    # Clean column names
     df_forces.columns = df_forces.columns.str.strip()
     df_connectivity.columns = df_connectivity.columns.str.strip()
     df_points.columns = df_points.columns.str.strip()
 
-    # --- Data Type Conversion ---
+    # --- Pre-computation Data Type Conversion ---
     force_numeric_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Station']
     for col in force_numeric_cols:
         df_forces[col] = pd.to_numeric(df_forces[col], errors='coerce')
+
     conn_numeric_cols = ['Length', 'Unique Name', 'UniquePtI', 'UniquePtJ']
     for col in conn_numeric_cols:
         df_connectivity[col] = pd.to_numeric(df_connectivity[col], errors='coerce')
+
     point_numeric_cols = ['UniqueName', 'X', 'Y', 'Z']
     for col in point_numeric_cols:
         df_points[col] = pd.to_numeric(df_points[col], errors='coerce')
+    
     df_forces.dropna(subset=force_numeric_cols, inplace=True)
     
     # --- Combination Calculation ---
@@ -59,7 +65,6 @@ def process_excel_data(uploaded_excel_file):
         'U07': {'Dead': 0.9, 'SDL': 0.9, 'EX': -1}, 'U08': {'Dead': 0.9, 'SDL': 0.9, 'EY': 1},
         'U09': {'Dead': 0.9, 'SDL': 0.9, 'EY': -1},
     }
-
     combo_dfs = []
     for name, factors in combinations.items():
         temp_df = pivot_df[group_cols].copy()
@@ -72,7 +77,7 @@ def process_excel_data(uploaded_excel_file):
         combo_dfs.append(temp_df)
     df_combinations = pd.concat(combo_dfs, ignore_index=True)
 
-    # --- Coordinate Merging ---
+    # --- Coordinate Merging (The stable way to prevent KeyError) ---
     df_conn_subset = df_connectivity[['Unique Name', 'UniquePtI', 'UniquePtJ', 'Length']]
     df_points_coords = df_points[['UniqueName', 'X', 'Y', 'Z']].drop_duplicates()
     df_merged_coords = pd.merge(df_conn_subset, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName', 'X', 'Y'])
@@ -87,26 +92,26 @@ def process_excel_data(uploaded_excel_file):
     final_cols = ['Story', 'Column', 'Unique Name', 'Output Case', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'X', 'Y', 'Z_true']
     return df_final[final_cols]
 
-# --- ส่วนของหน้าเว็บ (Streamlit UI) ---
+# --- Streamlit UI ---
 st.title("🏗️ Column Force Map Generator")
 
 with st.sidebar:
-    st.header("1. อัปโหลดไฟล์ Excel")
-    st.info("ไฟล์ Excel ต้องมีชีทชื่อ:\n- `Element Forces - Columns`\n- `Column Object Connectivity`\n- `Point Object Connectivity`")
-    excel_file = st.file_uploader("อัปโหลดไฟล์ข้อมูลจาก ETABS (.xlsx)", type="xlsx")
+    st.header("1. Upload Excel File")
+    st.info("The Excel file must contain these sheets:\n- `Element Forces - Columns`\n- `Column Object Connectivity`\n- `Point Object Connectivity`")
+    excel_file = st.file_uploader("Upload ETABS Data File (.xlsx)", type="xlsx")
 
 if excel_file:
     processed_df = process_excel_data(excel_file)
     if processed_df is not None:
-        st.success("✔️ ประมวลผลไฟล์ Excel สำเร็จ!")
-        with st.expander("แสดงผลลัพธ์การคำนวณทั้งหมด และดาวน์โหลด"):
+        st.success("✔️ Excel file processed successfully!")
+        with st.expander("View and Download All Calculated Results"):
             st.dataframe(processed_df)
-            st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมดเป็น CSV", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
+            st.download_button(label="📥 Download All Results as CSV", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
         st.divider()
 
-        st.header("3. สร้างแผนที่แรงในเสา")
+        st.header("3. Create Column Force Map")
         
-        # --- การเลือกชั้น (Hybrid: Buttons + Selectbox) ---
+        # --- Story Selection (Hybrid: Buttons + Selectbox) ---
         story_list = sorted(processed_df['Story'].unique(), reverse=True)
         if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
@@ -115,40 +120,39 @@ if excel_file:
             st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
 
         col1, col2, col3 = st.columns([1, 4, 1])
-        if col1.button('⬅️ ชั้นบน (Up)'):
+        if col1.button('⬅️ Upper Story (Up)'):
             st.session_state.story_index = max(0, st.session_state.story_index - 1)
             st.rerun()
-        if col3.button('ชั้นล่าง (Down) ➡️'):
+        if col3.button('Lower Story (Down) ➡️'):
             st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
             st.rerun()
             
-        selected_story = col2.selectbox("เลือกชั้นโดยตรง:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index_from_selectbox)
+        selected_story = col2.selectbox("Or select story directly:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index_from_selectbox)
         
-        # --- เลือกเกณฑ์ค่าสูงสุด ---
-        st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
-        criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
-        selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), horizontal=True)
+        # --- Max Value Criteria Selection ---
+        st.subheader("Select Criteria for Maximum Value Display")
+        criteria_options = {'P (Compression)': 'P_comp', 'P (Tension)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
+        selected_criteria_key = st.radio("Select force to view:", options=criteria_options.keys(), horizontal=True)
         selected_criteria_col = selected_criteria_key.split(' ')[0]
         
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
         
         if not df_story.empty:
             idx = None
-            if selected_criteria_key == 'P (แรงอัด)': idx = df_story.groupby('Unique Name')['P'].idxmin()
-            elif selected_criteria_key == 'P (แรงดึง)': idx = df_story.groupby('Unique Name')['P'].idxmax()
+            if selected_criteria_key == 'P (Compression)': idx = df_story.groupby('Unique Name')['P'].idxmin()
+            elif selected_criteria_key == 'P (Tension)': idx = df_story.groupby('Unique Name')['P'].idxmax()
             else:
                 df_story[f'{selected_criteria_col}_abs'] = df_story[selected_criteria_col].abs()
                 idx = df_story.groupby('Unique Name')[f'{selected_criteria_col}_abs'].idxmax()
             
-            # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
-            # ทำการ reset_index() เพื่อแก้ปัญหาข้อมูล hover แสดงผิดแถว
+            # --- The fix for the hover data issue ---
             df_max_val = df_story.loc[idx].reset_index(drop=True)
-            # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
 
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria_col]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
             
+            # --- Fix Axes and Add Color Scale ---
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
             padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
             x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
@@ -159,10 +163,10 @@ if excel_file:
             fig = px.scatter(
                 df_max_val, x='X', y='Y', text='Label',
                 color=value_to_display,
-                color_continuous_scale='RdBu',
+                color_continuous_scale='RdBu', # Red (Negative/Compression), Blue (Positive/Tension)
                 hover_name='Column',
                 hover_data=hover_data_config,
-                title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}"
+                title=f"Map of Max {selected_criteria_key} for Story: {selected_story}"
             )
 
             fig.update_traces(textposition='top center', textfont_size=10)
@@ -174,9 +178,9 @@ if excel_file:
             )
             
             st.plotly_chart(fig, use_container_width=True)
-            with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
+            with st.expander("View Data Used for Plot"):
                 st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
         else:
-            st.warning("ไม่พบข้อมูลสำหรับชั้นที่เลือก")
+            st.warning("No data found for the selected story.")
 else:
-    st.info("กรุณาอัปโหลดไฟล์ Excel (.xlsx) ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
+    st.info("Please upload an Excel file (.xlsx) in the sidebar to begin.")
