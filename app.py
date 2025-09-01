@@ -48,14 +48,6 @@ def process_excel_data(uploaded_excel_file):
     
     value_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3']
     group_cols = ['Story', 'Column', 'Unique Name', 'Station']
-    
-    # --- ตรวจสอบว่าคอลัมน์สำหรับ Group By มีอยู่จริงหรือไม่ ---
-    for col in group_cols:
-        if col not in df_forces_filtered.columns:
-            st.error(f"**เกิดข้อผิดพลาด:** ไม่พบคอลัมน์ '{col}' ที่จำเป็นสำหรับการคำนวณในชีท 'Element Forces - Columns'")
-            st.info("กรุณาตรวจสอบว่าชื่อคอลัมน์ในไฟล์ Excel ของคุณถูกต้อง")
-            return None
-    
     pivot_df = df_forces_filtered.pivot_table(index=group_cols, columns='Output Case', values=value_cols, fill_value=0)
     pivot_df.columns = ['_'.join(map(str, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
@@ -89,21 +81,12 @@ def process_excel_data(uploaded_excel_file):
     df_final = df_final[df_final['Length'] > 0].copy()
     df_final['Z_true'] = df_final['UniquePtI_Z'] + (df_final['Station'] / df_final['Length']) * (df_final['UniquePtJ_Z'] - df_final['UniquePtI_Z'])
     
-    # --- <<<<<<<<<<<<<<< DEBUGGING BLOCK >>>>>>>>>>>>>>> ---
     final_cols = ['Story', 'Column', 'Unique Name', 'Output Case', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'X', 'Y', 'Z_true']
-    missing_cols = [col for col in final_cols if col not in df_final.columns]
-    if missing_cols:
-        st.error(f"**เกิดข้อผิดพลาดในการประมวลผลข้อมูล**")
-        st.error(f"คอลัมน์ที่จำเป็นแต่หาไม่พบคือ: **{missing_cols}**")
-        st.info("คอลัมน์ทั้งหมดที่มีอยู่ในตารางข้อมูล ณ ขณะนี้คือ:")
-        st.code(df_final.columns.tolist())
-        return None
-    # --- <<<<<<<<<<<<<<< END DEBUGGING BLOCK >>>>>>>>>>>>>>> ---
-    
     return df_final[final_cols]
 
-# --- (ส่วน UI เหมือนเดิมทุกประการ) ---
+# --- ส่วนของหน้าเว็บ (Streamlit UI) ---
 st.title("🏗️ Column Force Map Generator")
+
 with st.sidebar:
     st.header("1. อัปโหลดไฟล์ Excel")
     st.info("ไฟล์ Excel ต้องมีชีทชื่อ:\n- `Element Forces - Columns`\n- `Column Object Connectivity`\n- `Point Object Connectivity`")
@@ -122,8 +105,10 @@ if excel_file:
         story_list = sorted(processed_df['Story'].unique(), reverse=True)
         if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
+
         def update_story_index_from_selectbox():
             st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
+
         col1, col2, col3 = st.columns([1, 4, 1])
         if col1.button('⬅️ ชั้นบน (Up)'):
             st.session_state.story_index = max(0, st.session_state.story_index - 1)
@@ -131,6 +116,7 @@ if excel_file:
         if col3.button('ชั้นล่าง (Down) ➡️'):
             st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
             st.rerun()
+            
         selected_story = col2.selectbox("เลือกชั้นโดยตรง:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index_from_selectbox)
         
         st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
@@ -148,6 +134,7 @@ if excel_file:
                 idx = df_story.groupby('Unique Name')[f'{selected_criteria_col}_abs'].idxmax()
             
             df_max_val = df_story.loc[idx].reset_index(drop=True)
+
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria_col]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
@@ -157,23 +144,50 @@ if excel_file:
             x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
             y_range = [processed_df['Y'].min() - padding_y, processed_df['Y'].max() + padding_y]
 
-            hover_data_config = {'P':'{:.2f}', 'V2':'{:.2f}', 'V3':'{:.2f}', 'T':'{:.2f}', 'M2':'{:.2f}', 'M3':'{:.2f}', 'Output Case':True, 'X':True, 'Y':True}
+            # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
+            # 1. สร้าง list ของ custom_data ที่จะส่งให้ hovertemplate
+            # 2. ลบ hover_data ออกจาก px.scatter
+            # 3. เพิ่ม fig.update_traces(hovertemplate=...) เพื่อกำหนดรูปแบบเอง
+            custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
 
             fig = px.scatter(
                 df_max_val, x='X', y='Y', text='Label',
                 color=value_to_display,
                 color_continuous_scale='RdBu',
                 hover_name='Column',
-                hover_data=hover_data_config,
-                title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}"
+                custom_data=custom_data_cols # ส่งข้อมูลทั้งหมดที่เราต้องการใช้เข้าไป
             )
-            fig.update_traces(textposition='top center', textfont_size=10)
+
+            # สร้างแม่แบบ (Template) สำหรับกล่องข้อความ
+            hovertemplate = (
+                "<b>%{hovertext}</b><br><br>"
+                "X: %{x:.2f}<br>"
+                "Y: %{y:.2f}<br>"
+                "<br><b>--- Forces ---</b><br>"
+                "P: %{customdata[0]:.2f}<br>"
+                "V2: %{customdata[1]:.2f}<br>"
+                "V3: %{customdata[2]:.2f}<br>"
+                "T: %{customdata[3]:.2f}<br>"
+                "M2: %{customdata[4]:.2f}<br>"
+                "M3: %{customdata[5]:.2f}<br>"
+                "<b>Output Case:</b> %{customdata[6]}"
+                "<extra></extra>" # ซ่อน trace name ที่ไม่จำเป็น
+            )
+
+            fig.update_traces(
+                textposition='top center', 
+                textfont_size=10,
+                hovertemplate=hovertemplate # กำหนดให้ใช้แม่แบบของเรา
+            )
+            # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
+
             fig.update_layout(
                 xaxis_range=x_range, yaxis_range=y_range,
                 xaxis_title="X Coordinate (m)", yaxis_title="Y Coordinate (m)",
                 yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700,
                 coloraxis_colorbar_title_text=selected_criteria_key
             )
+            
             st.plotly_chart(fig, use_container_width=True)
             with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
                 st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
