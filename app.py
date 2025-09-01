@@ -104,11 +104,9 @@ with st.sidebar:
             st.success("ประมวลผลสำเร็จ!")
             st.divider()
 
-            # --- <<<<<<<<<<<<<<< ย้ายมาไว้ที่นี่ >>>>>>>>>>>>>>> ---
             with st.expander("ดูและดาวน์โหลดผลลัพธ์ทั้งหมด"):
                 st.dataframe(processed_df)
                 st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมด", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
-            # --- <<<<<<<<<<<<<<< จบส่วนที่ย้ายมา >>>>>>>>>>>>>>> ---
             
             st.divider()
             
@@ -138,6 +136,12 @@ with st.sidebar:
             criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
             selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys())
 
+            # --- <<<<<<<<<<<<<<< ส่วนที่เพิ่มเข้ามา >>>>>>>>>>>>>>> ---
+            st.divider()
+            st.subheader("4. ตั้งค่าการแสดงผล")
+            show_labels = st.toggle("แสดงป้ายกำกับบนกราฟ (Show Labels)", value=True)
+            # --- <<<<<<<<<<<<<<< จบส่วนที่เพิ่มเข้ามา >>>>>>>>>>>>>>> ---
+
 # --- Main Panel Display ---
 if not excel_file:
     st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
@@ -161,10 +165,16 @@ elif 'processed_df' in locals() and processed_df is not None:
             df_max_val = df_max_val[df_max_val['P'] > 0].copy()
 
         if not df_max_val.empty:
+            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+            # สร้าง Label พื้นฐานไว้ก่อน
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria_col]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
             
+            # สร้างคอลัมน์ใหม่สำหรับแสดงผลโดยขึ้นอยู่กับค่าของ Toggle
+            df_max_val['DisplayLabel'] = df_max_val['Label'] if show_labels else None
+            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
             padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
             x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
@@ -172,7 +182,8 @@ elif 'processed_df' in locals() and processed_df is not None:
 
             custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
             fig = px.scatter(
-                df_max_val, x='X', y='Y', text='Label',
+                df_max_val, x='X', y='Y', 
+                text='DisplayLabel', # ใช้คอลัมน์ใหม่ในการแสดงผล
                 color=value_to_display,
                 color_continuous_scale='RdBu',
                 hover_name='Column',
