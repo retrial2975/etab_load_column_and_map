@@ -25,12 +25,12 @@ def process_excel_data(uploaded_excel_file):
         st.error("กรุณาตรวจสอบว่าไฟล์ Excel มีชีทชื่อ 'Element Forces - Columns', 'Column Object Connectivity', และ 'Point Object Connectivity' ครบถ้วน")
         return None
 
-    # (ส่วนการคำนวณเหมือนเดิม)
+    # ล้างชื่อคอลัมน์
     df_forces.columns = df_forces.columns.str.strip()
     df_connectivity.columns = df_connectivity.columns.str.strip()
     df_points.columns = df_points.columns.str.strip()
 
-    # --- Pre-computation Data Conversion ---
+    # --- แปลงชนิดข้อมูลล่วงหน้า ---
     force_numeric_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Station']
     for col in force_numeric_cols:
         df_forces[col] = pd.to_numeric(df_forces[col], errors='coerce')
@@ -45,7 +45,7 @@ def process_excel_data(uploaded_excel_file):
     
     df_forces.dropna(subset=force_numeric_cols, inplace=True)
     
-    # --- Combination Calculation ---
+    # --- คำนวณ Combination ---
     df_forces['Output Case'] = df_forces['Output Case'].str.strip()
     allowed_cases = ['Dead', 'Live', 'SDL', 'EX', 'EY']
     df_forces_filtered = df_forces[df_forces['Output Case'].isin(allowed_cases)]
@@ -76,10 +76,17 @@ def process_excel_data(uploaded_excel_file):
         combo_dfs.append(temp_df)
     df_combinations = pd.concat(combo_dfs, ignore_index=True)
 
-    # --- Coordinate Merging and Z Calculation ---
+    # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไขข้อผิดพลาด >>>>>>>>>>>>>>> ---
+    # เลือกเฉพาะคอลัมน์ที่จำเป็นจาก df_connectivity เพื่อป้องกันชื่อซ้ำซ้อน
+    df_conn_subset = df_connectivity[['Unique Name', 'UniquePtI', 'UniquePtJ', 'Length']]
+    
     df_points_coords = df_points[['UniqueName', 'X', 'Y', 'Z']].drop_duplicates()
-    df_merged_coords = pd.merge(df_connectivity, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName', 'X', 'Y'])
+    
+    # ทำการ Merge โดยใช้ df_conn_subset ที่เลือกคอลัมน์แล้ว
+    df_merged_coords = pd.merge(df_conn_subset, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName'])
     df_merged_coords = pd.merge(df_merged_coords, df_points_coords, left_on='UniquePtJ', right_on='UniqueName', how='left').rename(columns={'X': 'X', 'Y': 'Y', 'Z': 'UniquePtJ_Z'}).drop(columns=['UniqueName'])
+    # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
+    
     df_final = pd.merge(df_combinations, df_merged_coords, on='Unique Name', how='left')
     df_final.dropna(subset=['Station', 'Length', 'UniquePtI_Z', 'UniquePtJ_Z'], inplace=True)
     df_final = df_final[df_final['Length'] > 0].copy()
@@ -107,7 +114,6 @@ if excel_file:
 
         st.header("3. สร้างแผนที่แรงในเสา")
         
-        # --- <<<<<<<<<<<<<<< ปรับปรุงการเลือกชั้น >>>>>>>>>>>>>>> ---
         story_list = sorted(processed_df['Story'].unique())
         if 'story_index' not in st.session_state:
             st.session_state.story_index = 0
@@ -121,7 +127,6 @@ if excel_file:
         selected_story = story_list[st.session_state.story_index]
         col2.metric("ชั้นที่เลือก (Selected Story)", selected_story)
         
-        # --- <<<<<<<<<<<<<<< เพิ่มตัวเลือกเกณฑ์ค่าสูงสุด >>>>>>>>>>>>>>> ---
         st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
         criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
         selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), horizontal=True)
@@ -130,22 +135,20 @@ if excel_file:
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
         
         if not df_story.empty:
-            # --- Logic การหาค่าสูงสุดตามเกณฑ์ ---
             idx = None
             if selected_criteria == 'P_comp':
                 idx = df_story.groupby('Unique Name')['P'].idxmin()
             elif selected_criteria == 'P_tens':
                 idx = df_story.groupby('Unique Name')['P'].idxmax()
-            else: # V2, V3, T, M2, M3
+            else:
                 df_story[f'{selected_criteria}_abs'] = df_story[selected_criteria].abs()
                 idx = df_story.groupby('Unique Name')[f'{selected_criteria}_abs'].idxmax()
             
             df_max_val = df_story.loc[idx]
 
-            # --- สร้าง Label และ Hover Data ---
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria.replace('_comp','').replace('_tens','')]
-            df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_key}=" + value_to_display.round(2).astype(str)
+            df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_key.split(' ')[0]}=" + value_to_display.round(2).astype(str)
             
             hover_cols = {
                 'P': ':.2f', 'V2': ':.2f', 'V3': ':.2f', 
