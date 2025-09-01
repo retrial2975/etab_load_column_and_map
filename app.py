@@ -110,11 +110,26 @@ with st.sidebar:
             
             st.divider()
             
-            st.subheader("2. เลือกชั้น")
+            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+            # 1. Initialize ค่าของทุกปุ่มไว้ใน session_state ถ้ายังไม่มี
             story_list = sorted(processed_df['Story'].unique(), reverse=True)
+            criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
+
             if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
                 st.session_state.story_index = 0
+            if 'show_combo_name' not in st.session_state:
+                st.session_state.show_combo_name = True
+            if 'show_force_value' not in st.session_state:
+                st.session_state.show_force_value = True
 
+            # --- 2. ตั้งค่าการแสดงผล (ย้ายขึ้นมาเพื่อให้ State ถูกต้อง) ---
+            st.subheader("ตั้งค่าการแสดงผล")
+            st.toggle("แสดงชื่อ Combination (UXX)", key='show_combo_name')
+            st.toggle("แสดงค่าแรง (Force Value)", key='show_force_value')
+            st.divider()
+
+            # --- 3. เลือกชั้น ---
+            st.subheader("เลือกชั้น")
             def update_story_index_from_selectbox():
                 st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
 
@@ -132,15 +147,9 @@ with st.sidebar:
             
             st.divider()
             
-            st.subheader("3. เลือกเกณฑ์ค่าสูงสุด")
-            criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
+            # --- 4. เลือกเกณฑ์ค่าสูงสุด ---
+            st.subheader("เลือกเกณฑ์ค่าสูงสุด")
             selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys())
-
-            st.divider()
-            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            st.subheader("4. ตั้งค่าการแสดงผล")
-            show_combo_name = st.toggle("แสดงชื่อ Combination (UXX)", value=True)
-            show_force_value = st.toggle("แสดงค่าแรง (Force Value)", value=True)
             # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
 
 # --- Main Panel Display ---
@@ -166,23 +175,22 @@ elif 'processed_df' in locals() and processed_df is not None:
             df_max_val = df_max_val[df_max_val['P'] > 0].copy()
 
         if not df_max_val.empty:
-            df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
-            value_to_display = df_max_val[selected_criteria_col]
-
             # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            # สร้าง Label แบบมีเงื่อนไขตามปุ่ม Toggle
+            # สร้าง Label โดยอ่านค่าจาก session_state
             def build_label(row):
                 parts = []
-                if show_combo_name:
+                if st.session_state.show_combo_name:
                     parts.append(row['Case_Name_Short'])
-                if show_force_value:
+                if st.session_state.show_force_value:
                     force_str = f"{selected_criteria_col}={row[selected_criteria_col]:.2f}"
                     parts.append(force_str)
                 return ": ".join(parts)
             
+            df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             df_max_val['DisplayLabel'] = df_max_val.apply(build_label, axis=1)
             # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            
+
+            value_to_display = df_max_val[selected_criteria_col]
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
             padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
             x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
@@ -191,7 +199,7 @@ elif 'processed_df' in locals() and processed_df is not None:
             custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
             fig = px.scatter(
                 df_max_val, x='X', y='Y', 
-                text='DisplayLabel', # ใช้คอลัมน์ใหม่ในการแสดงผล
+                text='DisplayLabel',
                 color=value_to_display,
                 color_continuous_scale='RdBu',
                 hover_name='Column',
