@@ -112,15 +112,8 @@ with st.sidebar:
             
             st.subheader("2. เลือกชั้น")
             story_list = sorted(processed_df['Story'].unique(), reverse=True)
-            criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
-
-            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            # 1. Initialize ค่าของทุกปุ่มไว้ใน session_state ถ้ายังไม่มี
             if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
                 st.session_state.story_index = 0
-            # **เพิ่มการจดจำค่าของ Radio button**
-            if 'criteria_key' not in st.session_state:
-                st.session_state.criteria_key = list(criteria_options.keys())[0]
 
             def update_story_index_from_selectbox():
                 st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
@@ -140,17 +133,20 @@ with st.sidebar:
             st.divider()
             
             st.subheader("3. เลือกเกณฑ์ค่าสูงสุด")
-            # 2. ให้ Radio button บันทึกค่าลงใน session_state โดยตรงผ่าน key
-            st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), key='criteria_key')
+            criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
+            selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys())
+
+            st.divider()
+            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+            st.subheader("4. ตั้งค่าการแสดงผล")
+            show_combo_name = st.toggle("แสดงชื่อ Combination (UXX)", value=True)
+            show_force_value = st.toggle("แสดงค่าแรง (Force Value)", value=True)
             # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            
+
 # --- Main Panel Display ---
 if not excel_file:
     st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
 elif 'processed_df' in locals() and processed_df is not None:
-    # 3. อ่านค่าที่ถูกต้องจาก session_state มาใช้งานเสมอ
-    selected_criteria_key = st.session_state.criteria_key
-    
     st.header(f"🗺️ แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
 
     selected_criteria_col = selected_criteria_key.split(' ')[0]
@@ -172,7 +168,20 @@ elif 'processed_df' in locals() and processed_df is not None:
         if not df_max_val.empty:
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria_col]
-            df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
+
+            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+            # สร้าง Label แบบมีเงื่อนไขตามปุ่ม Toggle
+            def build_label(row):
+                parts = []
+                if show_combo_name:
+                    parts.append(row['Case_Name_Short'])
+                if show_force_value:
+                    force_str = f"{selected_criteria_col}={row[selected_criteria_col]:.2f}"
+                    parts.append(force_str)
+                return ": ".join(parts)
+            
+            df_max_val['DisplayLabel'] = df_max_val.apply(build_label, axis=1)
+            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
             
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
             padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
@@ -182,7 +191,7 @@ elif 'processed_df' in locals() and processed_df is not None:
             custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
             fig = px.scatter(
                 df_max_val, x='X', y='Y', 
-                text='Label',
+                text='DisplayLabel', # ใช้คอลัมน์ใหม่ในการแสดงผล
                 color=value_to_display,
                 color_continuous_scale='RdBu',
                 hover_name='Column',
