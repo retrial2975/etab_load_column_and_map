@@ -14,7 +14,7 @@ def convert_df_to_csv(df):
 @st.cache_data
 def process_excel_data(uploaded_excel_file):
     """
-    ฟังก์ชันหลักในการประมวลผลข้อมูลจากไฟล์ Excel ที่อัปโหลด (จากโค้ดเวอร์ชันที่เสถียร)
+    ฟังก์ชันหลักในการประมวลผลข้อมูลจากไฟล์ Excel ที่อัปโหลด
     """
     try:
         df_forces = pd.read_excel(uploaded_excel_file, sheet_name='Element Forces - Columns', header=1).drop(0).reset_index(drop=True)
@@ -30,30 +30,29 @@ def process_excel_data(uploaded_excel_file):
     df_points.columns = df_points.columns.str.strip()
 
     # --- Data Type Conversion ---
-    df_forces['Station'] = pd.to_numeric(df_forces['Station'], errors='coerce')
-    force_numeric_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3']
+    force_numeric_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Station']
     for col in force_numeric_cols:
         df_forces[col] = pd.to_numeric(df_forces[col], errors='coerce')
-    df_forces.dropna(subset=['Station'] + force_numeric_cols, inplace=True)
-
-    df_connectivity['Length'] = pd.to_numeric(df_connectivity['Length'], errors='coerce')
-    df_connectivity['Unique Name'] = pd.to_numeric(df_connectivity['Unique Name'], errors='coerce')
-    df_connectivity['UniquePtI'] = pd.to_numeric(df_connectivity['UniquePtI'], errors='coerce')
-    df_connectivity['UniquePtJ'] = pd.to_numeric(df_connectivity['UniquePtJ'], errors='coerce')
+    conn_numeric_cols = ['Length', 'Unique Name', 'UniquePtI', 'UniquePtJ']
+    for col in conn_numeric_cols:
+        df_connectivity[col] = pd.to_numeric(df_connectivity[col], errors='coerce')
     point_numeric_cols = ['UniqueName', 'X', 'Y', 'Z']
     for col in point_numeric_cols:
         df_points[col] = pd.to_numeric(df_points[col], errors='coerce')
-
+    df_forces.dropna(subset=force_numeric_cols, inplace=True)
+    
     # --- Combination Calculation ---
     df_forces['Output Case'] = df_forces['Output Case'].str.strip()
     allowed_cases = ['Dead', 'Live', 'SDL', 'EX', 'EY']
     df_forces_filtered = df_forces[df_forces['Output Case'].isin(allowed_cases)]
+    
     value_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3']
     group_cols = ['Story', 'Column', 'Unique Name', 'Station']
     pivot_df = df_forces_filtered.pivot_table(index=group_cols, columns='Output Case', values=value_cols, fill_value=0)
     pivot_df.columns = ['_'.join(map(str, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
 
+    # ผมยังจำสูตรที่คุณเคยให้ผมไว้ได้ครับ
     combinations = {
         'U01': {'Dead': 1.4, 'SDL': 1.4, 'Live': 1.7}, 'U02': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': 1},
         'U03': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': -1}, 'U04': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EY': 1},
@@ -75,8 +74,6 @@ def process_excel_data(uploaded_excel_file):
     df_combinations = pd.concat(combo_dfs, ignore_index=True)
 
     # --- Coordinate Merging ---
-    # **นี่คือส่วนสำคัญที่ทำให้โค้ดเวอร์ชันนี้ไม่ Error**
-    # เราเลือกเฉพาะคอลัมน์ที่จำเป็นจาก df_connectivity ก่อน merge เพื่อป้องกันชื่อซ้ำ
     df_conn_subset = df_connectivity[['Unique Name', 'UniquePtI', 'UniquePtJ', 'Length']]
     df_points_coords = df_points[['UniqueName', 'X', 'Y', 'Z']].drop_duplicates()
     df_merged_coords = pd.merge(df_conn_subset, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName', 'X', 'Y'])
@@ -103,61 +100,82 @@ if excel_file:
     processed_df = process_excel_data(excel_file)
     if processed_df is not None:
         st.success("✔️ ประมวลผลไฟล์ Excel สำเร็จ!")
-        st.header("2. ผลลัพธ์การคำนวณทั้งหมด")
-        st.dataframe(processed_df)
-        st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมดเป็น CSV", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
+        with st.expander("แสดงผลลัพธ์การคำนวณทั้งหมด และดาวน์โหลด"):
+            st.dataframe(processed_df)
+            st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมดเป็น CSV", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
         st.divider()
 
         st.header("3. สร้างแผนที่แรงในเสา")
         
-        # --- ส่วนที่ 1: ปรับปรุงการเลือกชั้น (ใช้ปุ่มกด) ---
-        story_list = sorted(processed_df['Story'].unique(), reverse=True) # เรียงจากชั้นบนสุดไปล่างสุด
+        # --- ปรับปรุงการเลือกชั้น (Hybrid: Buttons + Selectbox) ---
+        story_list = sorted(processed_df['Story'].unique(), reverse=True)
         if 'story_index' not in st.session_state:
             st.session_state.story_index = 0
 
-        col1, col2, col3 = st.columns([1, 2, 1])
-        if col1.button('⬅️ ชั้นก่อนหน้า (Up)'):
+        # Callback function to update index from selectbox
+        def update_story_index():
+            st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
+
+        col1, col2, col3 = st.columns([1, 4, 1])
+        if col1.button('⬅️ ชั้นบน (Up)'):
             st.session_state.story_index = max(0, st.session_state.story_index - 1)
-        if col3.button('ชั้นถัดไป (Down) ➡️'):
+        if col3.button('ชั้นล่าง (Down) ➡️'):
             st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
         
-        if st.session_state.story_index >= len(story_list): # ป้องกัน Error หากมีการอัปโหลดไฟล์ใหม่
+        if st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
             
-        selected_story = story_list[st.session_state.story_index]
-        col2.metric("ชั้นที่เลือก (Selected Story)", selected_story)
+        selected_story = col2.selectbox(
+            "เลือกชั้นโดยตรง:",
+            options=story_list,
+            index=st.session_state.story_index,
+            key='story_selectbox',
+            on_change=update_story_index
+        )
         
-        # --- ส่วนที่ 2: เพิ่มตัวเลือกเกณฑ์ค่าสูงสุด ---
+        # --- เลือกเกณฑ์ค่าสูงสุด ---
         st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
         criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
         selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), horizontal=True)
-        selected_criteria_col = selected_criteria_key.split(' ')[0] #จะได้ P, V2, V3,...
+        selected_criteria_col = selected_criteria_key.split(' ')[0]
         
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
         
         if not df_story.empty:
             idx = None
-            if selected_criteria_key == 'P (แรงอัด)':
-                idx = df_story.groupby('Unique Name')['P'].idxmin()
-            elif selected_criteria_key == 'P (แรงดึง)':
-                idx = df_story.groupby('Unique Name')['P'].idxmax()
-            else: # สำหรับ V2, V3, T, M2, M3 จะหาค่า tuyệt đối ที่สูงสุด
+            if selected_criteria_key == 'P (แรงอัด)': idx = df_story.groupby('Unique Name')['P'].idxmin()
+            elif selected_criteria_key == 'P (แรงดึง)': idx = df_story.groupby('Unique Name')['P'].idxmax()
+            else:
                 df_story[f'{selected_criteria_col}_abs'] = df_story[selected_criteria_col].abs()
                 idx = df_story.groupby('Unique Name')[f'{selected_criteria_col}_abs'].idxmax()
-            
             df_max_val = df_story.loc[idx]
 
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria_col]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
             
-            hover_cols = {'P': ':.2f', 'V2': ':.2f', 'V3': ':.2f', 'T': ':.2f', 'M2': ':.2f', 'M3': ':.2f', 'X': True, 'Y': True, 'Output Case': True, 'Label': False}
+            # --- Fix แกน X,Y และเพิ่มแถบสี ---
+            padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
+            padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
+            x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
+            y_range = [processed_df['Y'].min() - padding_y, processed_df['Y'].max() + padding_y]
 
-            fig = px.scatter(df_max_val, x='X', y='Y', text='Label', hover_name='Column', hover_data=hover_cols,
-                             title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
+            fig = px.scatter(
+                df_max_val, x='X', y='Y', text='Label',
+                color=value_to_display,
+                color_continuous_scale=px.colors.diverging.RdBu_r, # แดง-ขาว-น้ำเงิน กลับด้าน
+                hover_name='Column',
+                hover_data={'P':'{:.2f}', 'V2':'{:.2f}', 'V3':'{:.2f}', 'T':'{:.2f}', 'M2':'{:.2f}', 'M3':'{:.2f}', 'Output Case':True, 'Label':False, 'X':True, 'Y':True},
+                title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}"
+            )
 
             fig.update_traces(textposition='top center', textfont_size=10)
-            fig.update_layout(xaxis_title="X Coordinate (m)", yaxis_title="Y Coordinate (m)", yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700, showlegend=False)
+            fig.update_layout(
+                xaxis_range=x_range, yaxis_range=y_range,
+                xaxis_title="X Coordinate (m)", yaxis_title="Y Coordinate (m)",
+                yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700,
+                coloraxis_colorbar_title_text=selected_criteria_key
+            )
             
             st.plotly_chart(fig, use_container_width=True)
             with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
