@@ -79,7 +79,6 @@ def process_excel_data(uploaded_excel_file):
     df_final = pd.merge(df_combinations, df_merged_coords, on='Unique Name', how='left')
     df_final.dropna(subset=['Station', 'Length', 'UniquePtI_Z', 'UniquePtJ_Z'], inplace=True)
     df_final = df_final[df_final['Length'] > 0].copy()
-
     df_final['Z_true'] = df_final['UniquePtI_Z'] + (df_final['Station'] / df_final['Length']) * (df_final['UniquePtJ_Z'] - df_final['UniquePtI_Z'])
     
     final_cols = ['Story', 'Column', 'Unique Name', 'Output Case', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'X', 'Y', 'Z_true']
@@ -110,73 +109,93 @@ with st.sidebar:
             
             st.divider()
             
+            # --- <<<<<<<<<<<<<<< ยกเครื่องระบบ State Management ทั้งหมด >>>>>>>>>>>>>>> ---
             story_list = sorted(processed_df['Story'].unique(), reverse=True)
             criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
+            combo_names = [f'U{i:02d}' for i in range(1, 10)]
 
-            if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
-                st.session_state.story_index = 0
-            if 'criteria_selection' not in st.session_state:
-                st.session_state.criteria_selection = list(criteria_options.keys())[0]
+            # 1. Initialize ค่าของทุกปุ่มไว้ใน session_state ถ้ายังไม่มี
+            if 'story' not in st.session_state or st.session_state.story not in story_list:
+                st.session_state.story = story_list[0]
+            if 'criteria' not in st.session_state:
+                st.session_state.criteria = list(criteria_options.keys())[0]
             if 'show_combo_name' not in st.session_state:
                 st.session_state.show_combo_name = True
             if 'show_force_value' not in st.session_state:
                 st.session_state.show_force_value = True
+            if 'selected_combos' not in st.session_state:
+                st.session_state.selected_combos = combo_names
 
-            st.subheader("2. ตั้งค่าการแสดงผล")
+            # 2. ตั้งค่าการแสดงผล
+            st.subheader("ตั้งค่าการแสดงผล")
             st.toggle("แสดงชื่อ Combination (UXX)", key='show_combo_name')
             st.toggle("แสดงค่าแรง (Force Value)", key='show_force_value')
             st.divider()
 
-            st.subheader("3. เลือกชั้น")
-            def update_story_index_from_selectbox():
-                st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
-            col1, col2 = st.columns(2)
-            if col1.button('⬅️ ชั้นบน'): st.session_state.story_index = max(0, st.session_state.story_index - 1); st.rerun()
-            if col2.button('ชั้นล่าง ➡️'): st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1); st.rerun()
-            selected_story = st.selectbox("หรือเลือกโดยตรง:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index_from_selectbox)
-            
-            st.divider()
-            
-            st.subheader("4. เลือกเกณฑ์ค่าสูงสุด")
-            def update_criteria():
-                st.session_state.criteria_selection = st.session_state.radio_widget
-            st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), key='radio_widget', on_change=update_criteria, index=list(criteria_options.keys()).index(st.session_state.criteria_selection))
+            # 3. เลือกชั้น
+            st.subheader("เลือกชั้น")
+            def go_to_prev_story():
+                current_index = story_list.index(st.session_state.story)
+                st.session_state.story = story_list[max(0, current_index - 1)]
+            def go_to_next_story():
+                current_index = story_list.index(st.session_state.story)
+                st.session_state.story = story_list[min(len(story_list) - 1, current_index + 1)]
 
-            # --- <<<<<<<<<<<<<<< ส่วนที่เพิ่มเข้ามา >>>>>>>>>>>>>>> ---
+            col1, col2 = st.columns(2)
+            col1.button('⬅️ ชั้นบน', on_click=go_to_prev_story)
+            col2.button('ชั้นล่าง ➡️', on_click=go_to_next_story)
+            st.selectbox("หรือเลือกโดยตรง:", options=story_list, key='story')
+            
             st.divider()
-            st.subheader("5. กรอง Load Combinations")
-            combo_names = [f'U{i:02d}' for i in range(1, 10)]
-            selected_combos = st.multiselect(
+            
+            # 4. เลือกเกณฑ์ค่าสูงสุด
+            st.subheader("เลือกเกณฑ์ค่าสูงสุด")
+            st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), key='criteria')
+            
+            st.divider()
+            
+            # 5. กรอง Load Combinations
+            st.subheader("กรอง Load Combinations")
+            def select_all():
+                st.session_state.selected_combos = combo_names
+            def deselect_all():
+                st.session_state.selected_combos = []
+            
+            c1, c2 = st.columns(2)
+            c1.button("เลือกทั้งหมด", on_click=select_all, use_container_width=True)
+            c2.button("ยกเลิกทั้งหมด", on_click=deselect_all, use_container_width=True)
+            
+            st.multiselect(
                 "เลือก Combination ที่จะนำมาพิจารณา:",
                 options=combo_names,
-                default=combo_names
+                key='selected_combos'
             )
-            # --- <<<<<<<<<<<<<<< จบส่วนที่เพิ่มเข้ามา >>>>>>>>>>>>>>> ---
+            # --- <<<<<<<<<<<<<<< จบส่วนยกเครื่อง >>>>>>>>>>>>>>> ---
 
 # --- Main Panel Display ---
 if not excel_file:
     st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
 elif 'processed_df' in locals() and processed_df is not None:
-    selected_criteria_key = st.session_state.criteria_selection
+    # --- อ่านค่าที่เลือกจาก session_state ที่เราควบคุมเองเสมอ ---
+    selected_story = st.session_state.story
+    selected_criteria_key = st.session_state.criteria
+    selected_combos = st.session_state.selected_combos
     
     st.header(f"🗺️ แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
 
     selected_criteria_col = selected_criteria_key.split(' ')[0]
     df_story = processed_df[processed_df['Story'] == selected_story].copy()
     
-    # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-    # 1. กรองข้อมูลตาม Combination ที่เลือกก่อนหาค่า Max
     df_story['ComboName'] = df_story['Output Case'].str.split(':').str[0]
     df_story_filtered = df_story[df_story['ComboName'].isin(selected_combos)]
-    # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
 
     if not df_story_filtered.empty:
         idx = None
-        # 2. ใช้ df_story_filtered ในการหาค่า Max
         if selected_criteria_key == 'P (แรงอัด)': idx = df_story_filtered.groupby('Unique Name')['P'].idxmin()
         elif selected_criteria_key == 'P (แรงดึง)': idx = df_story_filtered.groupby('Unique Name')['P'].idxmax()
         else:
-            df_story_filtered[f'{selected_criteria_col}_abs'] = df_story_filtered[selected_criteria_col].abs()
+            df_story_filtered = df_story_filtered.copy()
+            df_story_filtered.loc[:, f'{selected_criteria_col}_abs'] = df_story_filtered[selected_criteria_col].abs()
             idx = df_story_filtered.groupby('Unique Name')[f'{selected_criteria_col}_abs'].idxmax()
         
         df_max_val = df_story_filtered.loc[idx].reset_index(drop=True)
@@ -228,7 +247,7 @@ elif 'processed_df' in locals() and processed_df is not None:
                 st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
                 st.download_button(label="📥 ดาวน์โหลดข้อมูลที่พล็อตเป็น CSV", data=convert_df_to_csv(df_max_val), file_name=f'plot_data_{selected_story}_{selected_criteria_col}.csv', mime='text/csv')
         else:
-            st.info(f"ไม่พบเสาที่ตรงตามเงื่อนไข '{selected_criteria_key}' ในชั้น {selected_story}")
+            st.info(f"ไม่พบเสาที่ตรงตามเงื่อนไข '{selected_criteria_key}' ในชั้น {selected_story} (อาจจะเกิดจากการกรอง Combination ออกทั้งหมด)")
     else:
         st.warning("ไม่พบข้อมูลสำหรับชั้นที่เลือก หรือคุณอาจจะไม่ได้เลือก Combination ใดๆ เลย")
 elif excel_file is not None:
