@@ -98,10 +98,18 @@ with st.sidebar:
         help="ไฟล์ Excel ต้องมีชีทชื่อ: 'Element Forces - Columns', 'Column Object Connectivity', 'Point Object Connectivity'"
     )
 
-    # เราจะแสดงส่วนควบคุมที่เหลือ ก็ต่อเมื่อมีการอัปโหลดและประมวลผลไฟล์แล้ว
     if excel_file:
         processed_df = process_excel_data(excel_file)
         if processed_df is not None:
+            st.success("ประมวลผลสำเร็จ!")
+            st.divider()
+
+            # --- <<<<<<<<<<<<<<< ย้ายมาไว้ที่นี่ >>>>>>>>>>>>>>> ---
+            with st.expander("ดูและดาวน์โหลดผลลัพธ์ทั้งหมด"):
+                st.dataframe(processed_df)
+                st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมด", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
+            # --- <<<<<<<<<<<<<<< จบส่วนที่ย้ายมา >>>>>>>>>>>>>>> ---
+            
             st.divider()
             
             st.subheader("2. เลือกชั้น")
@@ -132,17 +140,8 @@ with st.sidebar:
 
 # --- Main Panel Display ---
 if not excel_file:
-    # --- นำคำแนะนำกลับมาแสดงผล ---
     st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
 elif 'processed_df' in locals() and processed_df is not None:
-    st.success("✔️ ประมวลผลไฟล์ Excel สำเร็จ!")
-    
-    # --- นำตารางผลลัพธ์รวมกลับมาแสดงผล ---
-    with st.expander("แสดงผลลัพธ์การคำนวณทั้งหมด และดาวน์โหลด"):
-        st.dataframe(processed_df)
-        st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมดเป็น CSV", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
-    st.divider()
-
     st.header(f"🗺️ แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
 
     selected_criteria_col = selected_criteria_key.split(' ')[0]
