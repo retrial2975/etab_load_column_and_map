@@ -34,15 +34,12 @@ def process_excel_data(uploaded_excel_file):
     force_numeric_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Station']
     for col in force_numeric_cols:
         df_forces[col] = pd.to_numeric(df_forces[col], errors='coerce')
-
     conn_numeric_cols = ['Length', 'Unique Name', 'UniquePtI', 'UniquePtJ']
     for col in conn_numeric_cols:
         df_connectivity[col] = pd.to_numeric(df_connectivity[col], errors='coerce')
-
     point_numeric_cols = ['UniqueName', 'X', 'Y', 'Z']
     for col in point_numeric_cols:
         df_points[col] = pd.to_numeric(df_points[col], errors='coerce')
-    
     df_forces.dropna(subset=force_numeric_cols, inplace=True)
     
     # --- คำนวณ Combination ---
@@ -76,18 +73,19 @@ def process_excel_data(uploaded_excel_file):
         combo_dfs.append(temp_df)
     df_combinations = pd.concat(combo_dfs, ignore_index=True)
 
-    # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไขข้อผิดพลาด >>>>>>>>>>>>>>> ---
-    # เลือกเฉพาะคอลัมน์ที่จำเป็นจาก df_connectivity เพื่อป้องกันชื่อซ้ำซ้อน
-    df_conn_subset = df_connectivity[['Unique Name', 'UniquePtI', 'UniquePtJ', 'Length']]
-    
+    # --- รวมตารางพิกัด ---
     df_points_coords = df_points[['UniqueName', 'X', 'Y', 'Z']].drop_duplicates()
-    
-    # ทำการ Merge โดยใช้ df_conn_subset ที่เลือกคอลัมน์แล้ว
-    df_merged_coords = pd.merge(df_conn_subset, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName'])
+    df_merged_coords = pd.merge(df_connectivity, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName'])
     df_merged_coords = pd.merge(df_merged_coords, df_points_coords, left_on='UniquePtJ', right_on='UniqueName', how='left').rename(columns={'X': 'X', 'Y': 'Y', 'Z': 'UniquePtJ_Z'}).drop(columns=['UniqueName'])
-    # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
     
+    # --- รวมตารางหลักและคำนวณ Z ---
     df_final = pd.merge(df_combinations, df_merged_coords, on='Unique Name', how='left')
+
+    # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไขข้อผิดพลาด >>>>>>>>>>>>>>> ---
+    # เปลี่ยนชื่อคอลัมน์ที่มี _x กลับเป็นชื่อเดิม
+    df_final.rename(columns={'Story_x': 'Story', 'Column_x': 'Column'}, inplace=True)
+    # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
+
     df_final.dropna(subset=['Station', 'Length', 'UniquePtI_Z', 'UniquePtJ_Z'], inplace=True)
     df_final = df_final[df_final['Length'] > 0].copy()
     df_final['Z_true'] = df_final['UniquePtI_Z'] + (df_final['Station'] / df_final['Length']) * (df_final['UniquePtJ_Z'] - df_final['UniquePtI_Z'])
@@ -124,6 +122,10 @@ if excel_file:
         if col3.button('ชั้นถัดไป ➡️'):
             st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
         
+        # ป้องกัน lỗi index out of bounds ถ้า story_list เปลี่ยนแปลง
+        if st.session_state.story_index >= len(story_list):
+            st.session_state.story_index = 0
+            
         selected_story = story_list[st.session_state.story_index]
         col2.metric("ชั้นที่เลือก (Selected Story)", selected_story)
         
@@ -150,11 +152,7 @@ if excel_file:
             value_to_display = df_max_val[selected_criteria.replace('_comp','').replace('_tens','')]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_key.split(' ')[0]}=" + value_to_display.round(2).astype(str)
             
-            hover_cols = {
-                'P': ':.2f', 'V2': ':.2f', 'V3': ':.2f', 
-                'T': ':.2f', 'M2': ':.2f', 'M3': ':.2f',
-                'X': True, 'Y': True, 'Output Case': True, 'Label': False
-            }
+            hover_cols = {'P': ':.2f', 'V2': ':.2f', 'V3': ':.2f', 'T': ':.2f', 'M2': ':.2f', 'M3': ':.2f', 'X': True, 'Y': True, 'Output Case': True, 'Label': False}
 
             fig = px.scatter(df_max_val, x='X', y='Y', text='Label', hover_name='Column', hover_data=hover_cols,
                              title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
