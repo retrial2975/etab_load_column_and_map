@@ -79,6 +79,7 @@ def process_excel_data(uploaded_excel_file):
     df_final = pd.merge(df_combinations, df_merged_coords, on='Unique Name', how='left')
     df_final.dropna(subset=['Station', 'Length', 'UniquePtI_Z', 'UniquePtJ_Z'], inplace=True)
     df_final = df_final[df_final['Length'] > 0].copy()
+
     df_final['Z_true'] = df_final['UniquePtI_Z'] + (df_final['Station'] / df_final['Length']) * (df_final['UniquePtJ_Z'] - df_final['UniquePtI_Z'])
     
     final_cols = ['Story', 'Column', 'Unique Name', 'Output Case', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'X', 'Y', 'Z_true']
@@ -102,6 +103,7 @@ if excel_file:
         st.divider()
 
         st.header("3. สร้างแผนที่แรงในเสา")
+        
         story_list = sorted(processed_df['Story'].unique(), reverse=True)
         if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
@@ -125,6 +127,7 @@ if excel_file:
         selected_criteria_col = selected_criteria_key.split(' ')[0]
         
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
+        
         if not df_story.empty:
             idx = None
             if selected_criteria_key == 'P (แรงอัด)': idx = df_story.groupby('Unique Name')['P'].idxmin()
@@ -135,62 +138,61 @@ if excel_file:
             
             df_max_val = df_story.loc[idx].reset_index(drop=True)
 
-            df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
-            value_to_display = df_max_val[selected_criteria_col]
-            df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
+            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+            # เพิ่มเงื่อนไขกรองเฉพาะค่าบวกสำหรับแรงดึง
+            if selected_criteria_key == 'P (แรงดึง)':
+                df_max_val = df_max_val[df_max_val['P'] > 0].copy()
+            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
             
-            padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
-            padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
-            x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
-            y_range = [processed_df['Y'].min() - padding_y, processed_df['Y'].max() + padding_y]
+            # --- สร้าง Label และ Hover Data (ต้องทำหลังจากกรองแล้ว) ---
+            if not df_max_val.empty:
+                df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
+                value_to_display = df_max_val[selected_criteria_col]
+                df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
+                
+                padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
+                padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
+                x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
+                y_range = [processed_df['Y'].min() - padding_y, processed_df['Y'].max() + padding_y]
 
-            # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
-            # 1. สร้าง list ของ custom_data ที่จะส่งให้ hovertemplate
-            # 2. ลบ hover_data ออกจาก px.scatter
-            # 3. เพิ่ม fig.update_traces(hovertemplate=...) เพื่อกำหนดรูปแบบเอง
-            custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
+                custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
 
-            fig = px.scatter(
-                df_max_val, x='X', y='Y', text='Label',
-                color=value_to_display,
-                color_continuous_scale='RdBu',
-                hover_name='Column',
-                custom_data=custom_data_cols # ส่งข้อมูลทั้งหมดที่เราต้องการใช้เข้าไป
-            )
+                fig = px.scatter(
+                    df_max_val, x='X', y='Y', text='Label',
+                    color=value_to_display,
+                    color_continuous_scale='RdBu',
+                    hover_name='Column',
+                    custom_data=custom_data_cols
+                )
+                
+                hovertemplate = (
+                    "<b>%{hovertext}</b><br><br>"
+                    "X: %{x:.2f}<br>"
+                    "Y: %{y:.2f}<br>"
+                    "<br><b>--- Forces ---</b><br>"
+                    "P: %{customdata[0]:.2f}<br>"
+                    "V2: %{customdata[1]:.2f}<br>"
+                    "V3: %{customdata[2]:.2f}<br>"
+                    "T: %{customdata[3]:.2f}<br>"
+                    "M2: %{customdata[4]:.2f}<br>"
+                    "M3: %{customdata[5]:.2f}<br>"
+                    "<b>Output Case:</b> %{customdata[6]}"
+                    "<extra></extra>"
+                )
 
-            # สร้างแม่แบบ (Template) สำหรับกล่องข้อความ
-            hovertemplate = (
-                "<b>%{hovertext}</b><br><br>"
-                "X: %{x:.2f}<br>"
-                "Y: %{y:.2f}<br>"
-                "<br><b>--- Forces ---</b><br>"
-                "P: %{customdata[0]:.2f}<br>"
-                "V2: %{customdata[1]:.2f}<br>"
-                "V3: %{customdata[2]:.2f}<br>"
-                "T: %{customdata[3]:.2f}<br>"
-                "M2: %{customdata[4]:.2f}<br>"
-                "M3: %{customdata[5]:.2f}<br>"
-                "<b>Output Case:</b> %{customdata[6]}"
-                "<extra></extra>" # ซ่อน trace name ที่ไม่จำเป็น
-            )
-
-            fig.update_traces(
-                textposition='top center', 
-                textfont_size=10,
-                hovertemplate=hovertemplate # กำหนดให้ใช้แม่แบบของเรา
-            )
-            # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
-
-            fig.update_layout(
-                xaxis_range=x_range, yaxis_range=y_range,
-                xaxis_title="X Coordinate (m)", yaxis_title="Y Coordinate (m)",
-                yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700,
-                coloraxis_colorbar_title_text=selected_criteria_key
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
-                st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
+                fig.update_traces(textposition='top center', textfont_size=10, hovertemplate=hovertemplate)
+                fig.update_layout(
+                    xaxis_range=x_range, yaxis_range=y_range,
+                    xaxis_title="X Coordinate (m)", yaxis_title="Y Coordinate (m)",
+                    yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700,
+                    coloraxis_colorbar_title_text=selected_criteria_key
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
+                    st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
+            else:
+                st.info(f"ไม่พบเสาที่มีค่า '{selected_criteria_key}' เป็นบวกในชั้น {selected_story}")
         else:
             st.warning("ไม่พบข้อมูลสำหรับชั้นที่เลือก")
 else:
