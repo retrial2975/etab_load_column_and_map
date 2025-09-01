@@ -5,14 +5,18 @@ import plotly.express as px
 # ตั้งค่าให้หน้าเว็บแสดงผลแบบเต็มความกว้าง
 st.set_page_config(layout="wide")
 
-# --- ส่วนของการคำนวณ (Function) ---
+# --- Function สำหรับแปลง DataFrame เป็น CSV ---
+@st.cache_data
+def convert_df_to_csv(df):
+    # ฟังก์ชันสำคัญ: แปลง DataFrame เป็นไฟล์ CSV (bytes) สำหรับปุ่ม Download
+    return df.to_csv(index=False).encode('utf-8')
 
+# --- ส่วนของการคำนวณ (Function) ---
 @st.cache_data
 def process_excel_data(uploaded_excel_file):
     """
     ฟังก์ชันหลักในการประมวลผลข้อมูลจากไฟล์ Excel ที่อัปโหลด
     """
-    # 1. โหลดข้อมูลจากชีทที่ต้องการในไฟล์ Excel
     try:
         df_forces = pd.read_excel(uploaded_excel_file, sheet_name='Element Forces - Columns', header=1).drop(0).reset_index(drop=True)
         df_connectivity = pd.read_excel(uploaded_excel_file, sheet_name='Column Object Connectivity', header=1).drop(0).reset_index(drop=True)
@@ -22,13 +26,11 @@ def process_excel_data(uploaded_excel_file):
         st.error("กรุณาตรวจสอบว่าไฟล์ Excel มีชีทชื่อ 'Element Forces - Columns', 'Column Object Connectivity', และ 'Point Object Connectivity' ครบถ้วน")
         return None
 
-    # ล้างชื่อคอลัมน์
+    # (ส่วนการคำนวณทั้งหมดเหมือนเดิมทุกประการ)
     df_forces.columns = df_forces.columns.str.strip()
     df_connectivity.columns = df_connectivity.columns.str.strip()
     df_points.columns = df_points.columns.str.strip()
 
-    # 2. คำนวณ Load Combinations (สำหรับทุก Station)
-    # (ส่วนนี้เหมือนเดิมทุกประการ)
     df_forces['Station'] = pd.to_numeric(df_forces['Station'], errors='coerce')
     force_numeric_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3']
     for col in force_numeric_cols:
@@ -45,7 +47,6 @@ def process_excel_data(uploaded_excel_file):
     pivot_df.columns = ['_'.join(map(str, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
 
-    # ผมยังจำสูตรที่คุณเคยให้ไว้ได้ครับ
     combinations = {
         'U01': {'Dead': 1.4, 'SDL': 1.4, 'Live': 1.7}, 'U02': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': 1},
         'U03': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': -1}, 'U04': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EY': 1},
@@ -71,8 +72,6 @@ def process_excel_data(uploaded_excel_file):
         combo_dfs.append(temp_df)
     df_combinations = pd.concat(combo_dfs, ignore_index=True)
 
-    # 3. เชื่อมพิกัดและหาความยาว
-    # (ส่วนนี้เหมือนเดิมทุกประการ)
     df_connectivity['Length'] = pd.to_numeric(df_connectivity['Length'], errors='coerce')
     df_connectivity['Unique Name'] = pd.to_numeric(df_connectivity['Unique Name'], errors='coerce')
     df_connectivity['UniquePtI'] = pd.to_numeric(df_connectivity['UniquePtI'], errors='coerce')
@@ -91,8 +90,6 @@ def process_excel_data(uploaded_excel_file):
         df_points_coords, left_on='UniquePtJ', right_on='UniqueName', how='left'
     ).rename(columns={'X': 'X', 'Y': 'Y', 'Z': 'UniquePtJ_Z'}).drop(columns=['UniqueName'])
 
-    # 4. รวมตารางและคำนวณค่า Z ที่แท้จริง
-    # (ส่วนนี้เหมือนเดิมทุกประการ)
     df_final = pd.merge(df_combinations, df_merged_coords, on='Unique Name', how='left')
     df_final.dropna(subset=['Station', 'Length', 'UniquePtI_Z', 'UniquePtJ_Z'], inplace=True)
     df_final = df_final[df_final['Length'] > 0].copy()
@@ -119,17 +116,33 @@ with st.sidebar:
 if excel_file:
     processed_df = process_excel_data(excel_file)
     
-    # ตรวจสอบว่าการประมวลผลสำเร็จหรือไม่
     if processed_df is not None:
         st.success("✔️ ประมวลผลไฟล์ Excel สำเร็จ!")
-
-        st.header("2. เลือกชั้นที่ต้องการแสดงผล")
+        
+        # --- <<<<<<<<<<<<<<< ส่วนที่เพิ่มเข้ามา >>>>>>>>>>>>>>> ---
+        st.header("2. ผลลัพธ์การคำนวณทั้งหมด")
+        st.write("คุณสามารถตรวจสอบข้อมูลทั้งหมดที่ผ่านการประมวลผลแล้วในตารางด้านล่าง และดาวน์โหลดเป็นไฟล์ CSV ได้")
+        
+        st.dataframe(processed_df)
+        
+        csv_data = convert_df_to_csv(processed_df)
+        st.download_button(
+           label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมดเป็น CSV",
+           data=csv_data,
+           file_name='column_processed_results.csv',
+           mime='text/csv',
+        )
+        st.divider()
+        # --- <<<<<<<<<<<<<<< จบส่วนที่เพิ่มเข้ามา >>>>>>>>>>>>>>> ---
+        
+        # ส่วนของการพล็อตกราฟ (ปรับลำดับเป็นข้อ 3)
+        st.header("3. สร้างแผนที่แรงในเสา")
         story_list = processed_df['Story'].unique()
-        selected_story = st.selectbox("เลือกชั้น (Story):", options=story_list)
+        selected_story = st.selectbox("เลือกชั้น (Story) ที่ต้องการพล็อต:", options=story_list)
 
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
         
-        st.header(f"🗺️ แผนที่แรง P สูงสุดสำหรับชั้น: {selected_story}")
+        st.subheader(f"🗺️ แผนที่แรง P สูงสุดสำหรับชั้น: {selected_story}")
 
         if not df_story.empty:
             df_story['P_abs'] = df_story['P'].abs()
