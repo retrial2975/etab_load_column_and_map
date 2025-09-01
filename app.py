@@ -117,12 +117,14 @@ with st.sidebar:
 
             if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
                 st.session_state.story_index = 0
+            if 'criteria_key' not in st.session_state:
+                st.session_state.criteria_key = list(criteria_options.keys())[0] # ตั้งค่าเริ่มต้นเป็น 'P (แรงอัด)'
             if 'show_combo_name' not in st.session_state:
                 st.session_state.show_combo_name = True
             if 'show_force_value' not in st.session_state:
                 st.session_state.show_force_value = True
 
-            # --- 2. ตั้งค่าการแสดงผล (ย้ายขึ้นมาเพื่อให้ State ถูกต้อง) ---
+            # --- 2. ตั้งค่าการแสดงผล (ใช้ key เพื่อเชื่อมกับ session_state) ---
             st.subheader("ตั้งค่าการแสดงผล")
             st.toggle("แสดงชื่อ Combination (UXX)", key='show_combo_name')
             st.toggle("แสดงค่าแรง (Force Value)", key='show_force_value')
@@ -147,15 +149,18 @@ with st.sidebar:
             
             st.divider()
             
-            # --- 4. เลือกเกณฑ์ค่าสูงสุด ---
+            # --- 4. เลือกเกณฑ์ค่าสูงสุด (ใช้ key เพื่อเชื่อมกับ session_state) ---
             st.subheader("เลือกเกณฑ์ค่าสูงสุด")
-            selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys())
+            st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), key='criteria_key')
             # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
 
 # --- Main Panel Display ---
 if not excel_file:
     st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
 elif 'processed_df' in locals() and processed_df is not None:
+    # --- อ่านค่าที่เลือกจาก session_state มาใช้ ---
+    selected_criteria_key = st.session_state.criteria_key
+    
     st.header(f"🗺️ แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
 
     selected_criteria_col = selected_criteria_key.split(' ')[0]
@@ -175,8 +180,7 @@ elif 'processed_df' in locals() and processed_df is not None:
             df_max_val = df_max_val[df_max_val['P'] > 0].copy()
 
         if not df_max_val.empty:
-            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            # สร้าง Label โดยอ่านค่าจาก session_state
+            # --- สร้าง Label โดยอ่านค่าจาก session_state ---
             def build_label(row):
                 parts = []
                 if st.session_state.show_combo_name:
@@ -188,7 +192,6 @@ elif 'processed_df' in locals() and processed_df is not None:
             
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             df_max_val['DisplayLabel'] = df_max_val.apply(build_label, axis=1)
-            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
 
             value_to_display = df_max_val[selected_criteria_col]
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
