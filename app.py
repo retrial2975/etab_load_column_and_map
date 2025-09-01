@@ -52,7 +52,6 @@ def process_excel_data(uploaded_excel_file):
     pivot_df.columns = ['_'.join(map(str, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
 
-    # ผมยังจำสูตรที่คุณเคยให้ผมไว้ได้ครับ
     combinations = {
         'U01': {'Dead': 1.4, 'SDL': 1.4, 'Live': 1.7}, 'U02': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': 1},
         'U03': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': -1}, 'U04': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EY': 1},
@@ -107,12 +106,11 @@ if excel_file:
 
         st.header("3. สร้างแผนที่แรงในเสา")
         
-        # --- ปรับปรุงการเลือกชั้น (Hybrid: Buttons + Selectbox) ---
+        # --- การเลือกชั้น (Hybrid: Buttons + Selectbox) ---
         story_list = sorted(processed_df['Story'].unique(), reverse=True)
         if 'story_index' not in st.session_state:
             st.session_state.story_index = 0
 
-        # Callback function to update index from selectbox
         def update_story_index():
             st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
 
@@ -125,13 +123,7 @@ if excel_file:
         if st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
             
-        selected_story = col2.selectbox(
-            "เลือกชั้นโดยตรง:",
-            options=story_list,
-            index=st.session_state.story_index,
-            key='story_selectbox',
-            on_change=update_story_index
-        )
+        selected_story = col2.selectbox("เลือกชั้นโดยตรง:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index)
         
         # --- เลือกเกณฑ์ค่าสูงสุด ---
         st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
@@ -154,20 +146,25 @@ if excel_file:
             value_to_display = df_max_val[selected_criteria_col]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
             
-            # --- Fix แกน X,Y และเพิ่มแถบสี ---
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
             padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
             x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
             y_range = [processed_df['Y'].min() - padding_y, processed_df['Y'].max() + padding_y]
 
+            # --- <<<<<<<<<<<<<<< ส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
+            # 1. ลบ 'Label':False ออกจาก hover_data
+            # 2. เปลี่ยน color_continuous_scale เป็น 'RdBu'
+            hover_data_config = {'P':'{:.2f}', 'V2':'{:.2f}', 'V3':'{:.2f}', 'T':'{:.2f}', 'M2':'{:.2f}', 'M3':'{:.2f}', 'Output Case':True, 'X':True, 'Y':True}
+
             fig = px.scatter(
                 df_max_val, x='X', y='Y', text='Label',
                 color=value_to_display,
-                color_continuous_scale=px.colors.diverging.RdBu_r, # แดง-ขาว-น้ำเงิน กลับด้าน
+                color_continuous_scale='RdBu', # สลับโทนสี: แดง (ลบ/อัด), น้ำเงิน (บวก/ดึง)
                 hover_name='Column',
-                hover_data={'P':'{:.2f}', 'V2':'{:.2f}', 'V3':'{:.2f}', 'T':'{:.2f}', 'M2':'{:.2f}', 'M3':'{:.2f}', 'Output Case':True, 'Label':False, 'X':True, 'Y':True},
+                hover_data=hover_data_config,
                 title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}"
             )
+            # --- <<<<<<<<<<<<<<< จบส่วนที่แก้ไข >>>>>>>>>>>>>>> ---
 
             fig.update_traces(textposition='top center', textfont_size=10)
             fig.update_layout(
