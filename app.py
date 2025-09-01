@@ -117,14 +117,25 @@ with st.sidebar:
 
             if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
                 st.session_state.story_index = 0
-            # **เพิ่มการจดจำค่าของ Radio button**
-            if 'criteria_key' not in st.session_state:
-                st.session_state.criteria_key = list(criteria_options.keys())[0]
+            # **ใช้ชื่อ session state ที่แยกจากกันสำหรับ widget และ ค่าที่เราจะใช้จริง**
+            if 'criteria_selection' not in st.session_state:
+                st.session_state.criteria_selection = list(criteria_options.keys())[0]
+            if 'show_combo_name' not in st.session_state:
+                st.session_state.show_combo_name = True
+            if 'show_force_value' not in st.session_state:
+                st.session_state.show_force_value = True
 
+            # --- 2. ตั้งค่าการแสดงผล ---
+            st.subheader("ตั้งค่าการแสดงผล")
+            st.toggle("แสดงชื่อ Combination (UXX)", key='show_combo_name')
+            st.toggle("แสดงค่าแรง (Force Value)", key='show_force_value')
+            st.divider()
+
+            # --- 3. เลือกชั้น ---
+            st.subheader("เลือกชั้น")
             def update_story_index_from_selectbox():
                 st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
 
-            st.subheader("2. เลือกชั้น")
             col1, col2 = st.columns(2)
             if col1.button('⬅️ ชั้นบน'): st.session_state.story_index = max(0, st.session_state.story_index - 1); st.rerun()
             if col2.button('ชั้นล่าง ➡️'): st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1); st.rerun()
@@ -139,17 +150,27 @@ with st.sidebar:
             
             st.divider()
             
-            st.subheader("3. เลือกเกณฑ์ค่าสูงสุด")
-            # 2. ให้ Radio button บันทึกค่าลงใน session_state โดยตรงผ่าน key
-            st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), key='criteria_key')
-            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+            # --- 4. เลือกเกณฑ์ค่าสูงสุด (ใช้วิธีที่รัดกุมที่สุด) ---
+            st.subheader("เลือกเกณฑ์ค่าสูงสุด")
+            # Callback เพื่ออัปเดตค่าที่เราจะใช้จริง
+            def update_criteria():
+                st.session_state.criteria_selection = st.session_state.radio_widget
             
+            st.radio(
+                "เลือกแรงที่ต้องการดู:", 
+                options=criteria_options.keys(), 
+                key='radio_widget', # Key ของ widget
+                on_change=update_criteria, # เมื่อเปลี่ยน ให้เรียก callback
+                index=list(criteria_options.keys()).index(st.session_state.criteria_selection) # แสดงผลตามค่าที่เราเก็บไว้จริง
+            )
+            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+
 # --- Main Panel Display ---
 if not excel_file:
     st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
 elif 'processed_df' in locals() and processed_df is not None:
-    # 3. อ่านค่าที่ถูกต้องจาก session_state มาใช้งานเสมอ
-    selected_criteria_key = st.session_state.criteria_key
+    # --- อ่านค่าที่เลือกจาก session_state ที่เราควบคุมเองเสมอ ---
+    selected_criteria_key = st.session_state.criteria_selection
     
     st.header(f"🗺️ แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
 
@@ -170,10 +191,19 @@ elif 'processed_df' in locals() and processed_df is not None:
             df_max_val = df_max_val[df_max_val['P'] > 0].copy()
 
         if not df_max_val.empty:
-            df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
-            value_to_display = df_max_val[selected_criteria_col]
-            df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
+            def build_label(row):
+                parts = []
+                if st.session_state.show_combo_name:
+                    parts.append(row['Case_Name_Short'])
+                if st.session_state.show_force_value:
+                    force_str = f"{selected_criteria_col}={row[selected_criteria_col]:.2f}"
+                    parts.append(force_str)
+                return ": ".join(parts)
             
+            df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
+            df_max_val['DisplayLabel'] = df_max_val.apply(build_label, axis=1)
+
+            value_to_display = df_max_val[selected_criteria_col]
             padding_x = (processed_df['X'].max() - processed_df['X'].min()) * 0.05
             padding_y = (processed_df['Y'].max() - processed_df['Y'].min()) * 0.05
             x_range = [processed_df['X'].min() - padding_x, processed_df['X'].max() + padding_x]
@@ -182,7 +212,7 @@ elif 'processed_df' in locals() and processed_df is not None:
             custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
             fig = px.scatter(
                 df_max_val, x='X', y='Y', 
-                text='Label',
+                text='DisplayLabel',
                 color=value_to_display,
                 color_continuous_scale='RdBu',
                 hover_name='Column',
