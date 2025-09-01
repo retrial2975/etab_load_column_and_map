@@ -52,6 +52,7 @@ def process_excel_data(uploaded_excel_file):
     pivot_df.columns = ['_'.join(map(str, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
 
+    # ผมยังจำสูตรที่คุณเคยให้ผมไว้ได้ครับ
     combinations = {
         'U01': {'Dead': 1.4, 'SDL': 1.4, 'Live': 1.7}, 'U02': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': 1},
         'U03': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EX': -1}, 'U04': {'Dead': 1.05, 'SDL': 1.05, 'Live': 1.275, 'EY': 1},
@@ -79,7 +80,6 @@ def process_excel_data(uploaded_excel_file):
     df_final = pd.merge(df_combinations, df_merged_coords, on='Unique Name', how='left')
     df_final.dropna(subset=['Station', 'Length', 'UniquePtI_Z', 'UniquePtJ_Z'], inplace=True)
     df_final = df_final[df_final['Length'] > 0].copy()
-
     df_final['Z_true'] = df_final['UniquePtI_Z'] + (df_final['Station'] / df_final['Length']) * (df_final['UniquePtJ_Z'] - df_final['UniquePtI_Z'])
     
     final_cols = ['Story', 'Column', 'Unique Name', 'Output Case', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'X', 'Y', 'Z_true']
@@ -105,30 +105,51 @@ if excel_file:
         st.header("3. สร้างแผนที่แรงในเสา")
         
         story_list = sorted(processed_df['Story'].unique(), reverse=True)
+        criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
+
+        # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+        # 1. Initialize session_state สำหรับเก็บค่าที่เลือกไว้
         if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
+        if 'criteria_key' not in st.session_state:
+            st.session_state.criteria_key = list(criteria_options.keys())[0] # ตั้งค่าเริ่มต้นเป็น 'P (แรงอัด)'
 
-        def update_story_index_from_selectbox():
+        # 2. สร้าง Callback function เพื่ออัปเดต session_state เมื่อมีการเปลี่ยนแปลง
+        def update_state():
             st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
+            st.session_state.criteria_key = st.session_state.criteria_radio
 
+        # --- การเลือกชั้น ---
         col1, col2, col3 = st.columns([1, 4, 1])
         if col1.button('⬅️ ชั้นบน (Up)'):
             st.session_state.story_index = max(0, st.session_state.story_index - 1)
-            st.rerun()
         if col3.button('ชั้นล่าง (Down) ➡️'):
             st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
-            st.rerun()
-            
-        selected_story = col2.selectbox("เลือกชั้นโดยตรง:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index_from_selectbox)
+
+        selected_story = col2.selectbox(
+            "เลือกชั้นโดยตรง:", options=story_list, 
+            index=st.session_state.story_index, 
+            key='story_selectbox', 
+            on_change=update_state
+        )
         
+        # --- เลือกเกณฑ์ค่าสูงสุด ---
         st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
-        criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
-        selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), horizontal=True)
+        # 3. ให้ Radio อ่านและเขียนค่าจาก session_state โดยตรง
+        selected_criteria_key = st.radio(
+            "เลือกแรงที่ต้องการดู:", options=criteria_options.keys(), 
+            horizontal=True, 
+            key='criteria_radio',
+            on_change=update_state,
+            index=list(criteria_options.keys()).index(st.session_state.criteria_key)
+        )
+        # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
+
         selected_criteria_col = selected_criteria_key.split(' ')[0]
-        
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
         
         if not df_story.empty:
+            # (ส่วนที่เหลือเหมือนเดิม)
             idx = None
             if selected_criteria_key == 'P (แรงอัด)': idx = df_story.groupby('Unique Name')['P'].idxmin()
             elif selected_criteria_key == 'P (แรงดึง)': idx = df_story.groupby('Unique Name')['P'].idxmax()
@@ -138,13 +159,9 @@ if excel_file:
             
             df_max_val = df_story.loc[idx].reset_index(drop=True)
 
-            # --- <<<<<<<<<<<<<<< ส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            # เพิ่มเงื่อนไขกรองเฉพาะค่าบวกสำหรับแรงดึง
             if selected_criteria_key == 'P (แรงดึง)':
                 df_max_val = df_max_val[df_max_val['P'] > 0].copy()
-            # --- <<<<<<<<<<<<<<< จบส่วนที่ปรับปรุง >>>>>>>>>>>>>>> ---
-            
-            # --- สร้าง Label และ Hover Data (ต้องทำหลังจากกรองแล้ว) ---
+
             if not df_max_val.empty:
                 df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
                 value_to_display = df_max_val[selected_criteria_col]
@@ -156,7 +173,6 @@ if excel_file:
                 y_range = [processed_df['Y'].min() - padding_y, processed_df['Y'].max() + padding_y]
 
                 custom_data_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']
-
                 fig = px.scatter(
                     df_max_val, x='X', y='Y', text='Label',
                     color=value_to_display,
@@ -164,22 +180,16 @@ if excel_file:
                     hover_name='Column',
                     custom_data=custom_data_cols
                 )
-                
                 hovertemplate = (
                     "<b>%{hovertext}</b><br><br>"
-                    "X: %{x:.2f}<br>"
-                    "Y: %{y:.2f}<br>"
+                    "X: %{x:.2f}<br>Y: %{y:.2f}<br>"
                     "<br><b>--- Forces ---</b><br>"
-                    "P: %{customdata[0]:.2f}<br>"
-                    "V2: %{customdata[1]:.2f}<br>"
-                    "V3: %{customdata[2]:.2f}<br>"
-                    "T: %{customdata[3]:.2f}<br>"
-                    "M2: %{customdata[4]:.2f}<br>"
-                    "M3: %{customdata[5]:.2f}<br>"
+                    "P: %{customdata[0]:.2f}<br>V2: %{customdata[1]:.2f}<br>"
+                    "V3: %{customdata[2]:.2f}<br>T: %{customdata[3]:.2f}<br>"
+                    "M2: %{customdata[4]:.2f}<br>M3: %{customdata[5]:.2f}<br>"
                     "<b>Output Case:</b> %{customdata[6]}"
                     "<extra></extra>"
                 )
-
                 fig.update_traces(textposition='top center', textfont_size=10, hovertemplate=hovertemplate)
                 fig.update_layout(
                     xaxis_range=x_range, yaxis_range=y_range,
@@ -187,12 +197,11 @@ if excel_file:
                     yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700,
                     coloraxis_colorbar_title_text=selected_criteria_key
                 )
-                
                 st.plotly_chart(fig, use_container_width=True)
                 with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
                     st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
             else:
-                st.info(f"ไม่พบเสาที่มีค่า '{selected_criteria_key}' เป็นบวกในชั้น {selected_story}")
+                st.info(f"ไม่พบเสาที่ตรงตามเงื่อนไข '{selected_criteria_key}' ในชั้น {selected_story}")
         else:
             st.warning("ไม่พบข้อมูลสำหรับชั้นที่เลือก")
 else:
