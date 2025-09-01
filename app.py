@@ -48,6 +48,14 @@ def process_excel_data(uploaded_excel_file):
     
     value_cols = ['P', 'V2', 'V3', 'T', 'M2', 'M3']
     group_cols = ['Story', 'Column', 'Unique Name', 'Station']
+    
+    # --- ตรวจสอบว่าคอลัมน์สำหรับ Group By มีอยู่จริงหรือไม่ ---
+    for col in group_cols:
+        if col not in df_forces_filtered.columns:
+            st.error(f"**เกิดข้อผิดพลาด:** ไม่พบคอลัมน์ '{col}' ที่จำเป็นสำหรับการคำนวณในชีท 'Element Forces - Columns'")
+            st.info("กรุณาตรวจสอบว่าชื่อคอลัมน์ในไฟล์ Excel ของคุณถูกต้อง")
+            return None
+    
     pivot_df = df_forces_filtered.pivot_table(index=group_cols, columns='Output Case', values=value_cols, fill_value=0)
     pivot_df.columns = ['_'.join(map(str, col)).strip() for col in pivot_df.columns.values]
     pivot_df.reset_index(inplace=True)
@@ -71,7 +79,6 @@ def process_excel_data(uploaded_excel_file):
         combo_dfs.append(temp_df)
     df_combinations = pd.concat(combo_dfs, ignore_index=True)
 
-    # --- Coordinate Merging ---
     df_conn_subset = df_connectivity[['Unique Name', 'UniquePtI', 'UniquePtJ', 'Length']]
     df_points_coords = df_points[['UniqueName', 'X', 'Y', 'Z']].drop_duplicates()
     df_merged_coords = pd.merge(df_conn_subset, df_points_coords, left_on='UniquePtI', right_on='UniqueName', how='left').rename(columns={'Z': 'UniquePtI_Z'}).drop(columns=['UniqueName', 'X', 'Y'])
@@ -86,30 +93,23 @@ def process_excel_data(uploaded_excel_file):
     final_cols = ['Story', 'Column', 'Unique Name', 'Output Case', 'Station', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'X', 'Y', 'Z_true']
     missing_cols = [col for col in final_cols if col not in df_final.columns]
     if missing_cols:
-        st.error(f"**เกิดข้อผิดพลาดร้ายแรง:** ไม่พบคอลัมน์ที่จำเป็นในตารางสุดท้าย")
-        st.error(f"คอลัมน์ที่ขาดหายไปคือ: **{missing_cols}**")
-        st.info("คอลัมน์ทั้งหมดที่มีอยู่คือ:")
+        st.error(f"**เกิดข้อผิดพลาดในการประมวลผลข้อมูล**")
+        st.error(f"คอลัมน์ที่จำเป็นแต่หาไม่พบคือ: **{missing_cols}**")
+        st.info("คอลัมน์ทั้งหมดที่มีอยู่ในตารางข้อมูล ณ ขณะนี้คือ:")
         st.code(df_final.columns.tolist())
-        return None # หยุดการทำงานของฟังก์ชัน
+        return None
     # --- <<<<<<<<<<<<<<< END DEBUGGING BLOCK >>>>>>>>>>>>>>> ---
     
     return df_final[final_cols]
 
-# --- ส่วนของหน้าเว็บ (Streamlit UI) ---
+# --- (ส่วน UI เหมือนเดิมทุกประการ) ---
 st.title("🏗️ Column Force Map Generator")
-# (The rest of the UI code is the same as the last version)
 with st.sidebar:
     st.header("1. อัปโหลดไฟล์ Excel")
     st.info("ไฟล์ Excel ต้องมีชีทชื่อ:\n- `Element Forces - Columns`\n- `Column Object Connectivity`\n- `Point Object Connectivity`")
     excel_file = st.file_uploader("อัปโหลดไฟล์ข้อมูลจาก ETABS (.xlsx)", type="xlsx")
 
 if excel_file:
-    # It's good practice to clear the cache when a new file is uploaded.
-    # This can be done manually by the user, but for robustness, we can add a button.
-    if st.sidebar.button('Clear Cache and Rerun'):
-        st.cache_data.clear()
-        st.rerun()
-
     processed_df = process_excel_data(excel_file)
     if processed_df is not None:
         st.success("✔️ ประมวลผลไฟล์ Excel สำเร็จ!")
@@ -119,14 +119,11 @@ if excel_file:
         st.divider()
 
         st.header("3. สร้างแผนที่แรงในเสา")
-        
         story_list = sorted(processed_df['Story'].unique(), reverse=True)
         if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
             st.session_state.story_index = 0
-
         def update_story_index_from_selectbox():
             st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
-
         col1, col2, col3 = st.columns([1, 4, 1])
         if col1.button('⬅️ ชั้นบน (Up)'):
             st.session_state.story_index = max(0, st.session_state.story_index - 1)
@@ -134,7 +131,6 @@ if excel_file:
         if col3.button('ชั้นล่าง (Down) ➡️'):
             st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
             st.rerun()
-            
         selected_story = col2.selectbox("เลือกชั้นโดยตรง:", options=story_list, index=st.session_state.story_index, key='story_selectbox', on_change=update_story_index_from_selectbox)
         
         st.subheader("เลือกเกณฑ์สำหรับแสดงค่าสูงสุด")
@@ -143,7 +139,6 @@ if excel_file:
         selected_criteria_col = selected_criteria_key.split(' ')[0]
         
         df_story = processed_df[processed_df['Story'] == selected_story].copy()
-        
         if not df_story.empty:
             idx = None
             if selected_criteria_key == 'P (แรงอัด)': idx = df_story.groupby('Unique Name')['P'].idxmin()
@@ -153,7 +148,6 @@ if excel_file:
                 idx = df_story.groupby('Unique Name')[f'{selected_criteria_col}_abs'].idxmax()
             
             df_max_val = df_story.loc[idx].reset_index(drop=True)
-
             df_max_val['Case_Name_Short'] = df_max_val['Output Case'].str.split(':').str[0]
             value_to_display = df_max_val[selected_criteria_col]
             df_max_val['Label'] = df_max_val['Case_Name_Short'] + f": {selected_criteria_col}=" + value_to_display.round(2).astype(str)
@@ -173,7 +167,6 @@ if excel_file:
                 hover_data=hover_data_config,
                 title=f"แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}"
             )
-
             fig.update_traces(textposition='top center', textfont_size=10)
             fig.update_layout(
                 xaxis_range=x_range, yaxis_range=y_range,
@@ -181,7 +174,6 @@ if excel_file:
                 yaxis_scaleanchor="x", yaxis_scaleratio=1, height=700,
                 coloraxis_colorbar_title_text=selected_criteria_key
             )
-            
             st.plotly_chart(fig, use_container_width=True)
             with st.expander("แสดงข้อมูลที่ใช้พล็อต"):
                 st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
