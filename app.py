@@ -88,11 +88,10 @@ def process_excel_data(uploaded_excel_file):
 # --- ส่วนของหน้าเว็บ (Streamlit UI) ---
 st.title("🏗️ Column Force Map Generator")
 
-# --- <<<<<<<<<<<<<<< ย้ายส่วนควบคุมทั้งหมดมาที่ Sidebar >>>>>>>>>>>>>>> ---
+# --- Sidebar Controls ---
 with st.sidebar:
     st.header("⚙️ Controls")
     
-    # 1. อัปโหลดไฟล์
     excel_file = st.file_uploader(
         "1. อัปโหลดไฟล์ Excel (.xlsx)", 
         type="xlsx",
@@ -105,7 +104,6 @@ with st.sidebar:
         if processed_df is not None:
             st.divider()
             
-            # 2. เลือกชั้น
             st.subheader("2. เลือกชั้น")
             story_list = sorted(processed_df['Story'].unique(), reverse=True)
             if 'story_index' not in st.session_state or st.session_state.story_index >= len(story_list):
@@ -115,12 +113,8 @@ with st.sidebar:
                 st.session_state.story_index = story_list.index(st.session_state.story_selectbox)
 
             col1, col2 = st.columns(2)
-            if col1.button('⬅️ ชั้นบน'):
-                st.session_state.story_index = max(0, st.session_state.story_index - 1)
-                st.rerun()
-            if col2.button('ชั้นล่าง ➡️'):
-                st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1)
-                st.rerun()
+            if col1.button('⬅️ ชั้นบน'): st.session_state.story_index = max(0, st.session_state.story_index - 1); st.rerun()
+            if col2.button('ชั้นล่าง ➡️'): st.session_state.story_index = min(len(story_list) - 1, st.session_state.story_index + 1); st.rerun()
                 
             selected_story = st.selectbox(
                 "หรือเลือกโดยตรง:", 
@@ -132,15 +126,23 @@ with st.sidebar:
             
             st.divider()
             
-            # 3. เลือกเกณฑ์ค่าสูงสุด
             st.subheader("3. เลือกเกณฑ์ค่าสูงสุด")
             criteria_options = {'P (แรงอัด)': 'P_comp', 'P (แรงดึง)': 'P_tens', 'V2': 'V2', 'V3': 'V3', 'T': 'T', 'M2': 'M2', 'M3': 'M3'}
             selected_criteria_key = st.radio("เลือกแรงที่ต้องการดู:", options=criteria_options.keys())
 
-# --- ส่วนแสดงผลหลัก ---
-if 'processed_df' in locals() and processed_df is not None:
+# --- Main Panel Display ---
+if not excel_file:
+    # --- นำคำแนะนำกลับมาแสดงผล ---
+    st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
+elif 'processed_df' in locals() and processed_df is not None:
     st.success("✔️ ประมวลผลไฟล์ Excel สำเร็จ!")
     
+    # --- นำตารางผลลัพธ์รวมกลับมาแสดงผล ---
+    with st.expander("แสดงผลลัพธ์การคำนวณทั้งหมด และดาวน์โหลด"):
+        st.dataframe(processed_df)
+        st.download_button(label="📥 ดาวน์โหลดผลลัพธ์ทั้งหมดเป็น CSV", data=convert_df_to_csv(processed_df), file_name='column_processed_results.csv', mime='text/csv')
+    st.divider()
+
     st.header(f"🗺️ แผนที่แสดงค่า {selected_criteria_key} สูงสุดสำหรับชั้น: {selected_story}")
 
     selected_criteria_col = selected_criteria_key.split(' ')[0]
@@ -199,11 +201,7 @@ if 'processed_df' in locals() and processed_df is not None:
             with st.expander("แสดงข้อมูลที่ใช้พล็อต และดาวน์โหลด"):
                 st.dataframe(df_max_val[['Story', 'Column', 'Unique Name', 'X', 'Y', 'P', 'V2', 'V3', 'T', 'M2', 'M3', 'Output Case']])
                 st.download_button(label="📥 ดาวน์โหลดข้อมูลที่พล็อตเป็น CSV", data=convert_df_to_csv(df_max_val), file_name=f'plot_data_{selected_story}_{selected_criteria_col}.csv', mime='text/csv')
-
         else:
             st.info(f"ไม่พบเสาที่ตรงตามเงื่อนไข '{selected_criteria_key}' ในชั้น {selected_story}")
     elif excel_file is not None:
-        # กรณีที่ process_excel_data() คืนค่า None (เกิด Error ภายในฟังก์ชัน)
-        st.warning("ไม่สามารถประมวลผลไฟล์ได้ กรุณาตรวจสอบข้อความ Error ด้านบน และอัปโหลดไฟล์ที่ถูกต้อง")
-else:
-    st.info("กรุณาอัปโหลดไฟล์ Excel ในแถบด้านข้าง (Sidebar) เพื่อเริ่มต้น")
+        st.warning("ไม่สามารถประมวลผลไฟล์ได้ กรุณาตรวจสอบข้อความ Error ที่แสดงผล")
